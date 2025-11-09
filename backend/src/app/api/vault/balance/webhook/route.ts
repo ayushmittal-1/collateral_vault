@@ -123,7 +123,7 @@ const provider = new AnchorProvider(connection, {} as any, {});
 // --- FIXES ---
 // 1. Swapped `provider` and `PROGRAM_ID` to the correct order.
 // 2. Used `as unknown as Idl` to fix the "readonly" error.
-const program = new Program(CollateralVault as unknown as Idl, provider, PROGRAM_ID);
+const program = new Program(CollateralVault as unknown as Idl, provider);
 //
 
 function parseHeliusEvent(tx: any) {
