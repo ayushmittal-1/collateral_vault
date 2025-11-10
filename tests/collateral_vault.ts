@@ -33,54 +33,77 @@ describe("collateral_vault", () => {
   const WITHDRAW_AMOUNT = new anchor.BN(50 * 10 ** 6); // 50 USDT
   const LOCK_AMOUNT = new anchor.BN(25 * 10 ** 6); // 25 USDT
 
-  before(async () => {
-    // Airdrop SOL to our new trading authority so it can sign
-    await provider.connection.confirmTransaction(
-      await provider.connection.requestAirdrop(
-        tradingAuthority.publicKey,
-        2 * anchor.web3.LAMPORTS_PER_SOL
-      )
-    );
+ before(async () => {
+  // --- NEW FUNDING METHOD ---
+  // We will fund our new keypairs from our main wallet to bypass the faucet
 
-    // Create a fake USDT Mint
-    const mintAuthority = anchor.web3.Keypair.generate();
-    await provider.connection.confirmTransaction(
-      await provider.connection.requestAirdrop(
-        mintAuthority.publicKey,
-        2 * anchor.web3.LAMPORTS_PER_SOL
-      )
-    );
-    usdtMint = await createMint(
-      provider.connection,
-      user.payer, mintAuthority.publicKey, null, 6
-    );
+  // 1. Create the keypairs
+  const mintAuthority = anchor.web3.Keypair.generate();
+  // (tradingAuthority is already defined at the top of your file)
 
-    // Create the user's token account
-    const userTokenAccountInfo = await getOrCreateAssociatedTokenAccount(
-      provider.connection,
-      user.payer, usdtMint, user.publicKey
-    );
-    userTokenAccount = userTokenAccountInfo.address;
+  // 2. Create and send a transaction to fund them
+  console.log("Funding test wallets from user wallet...");
+  const fundTx = new anchor.web3.Transaction().add(
+    // Fund the trading authority
+    anchor.web3.SystemProgram.transfer({
+      fromPubkey: user.publicKey,
+      toPubkey: tradingAuthority.publicKey,
+      lamports: 0.1 * anchor.web3.LAMPORTS_PER_SOL, // 0.1 SOL
+    }),
+    // Fund the mint authority
+    anchor.web3.SystemProgram.transfer({
+      fromPubkey: user.publicKey,
+      toPubkey: mintAuthority.publicKey,
+      lamports: 0.1 * anchor.web3.LAMPORTS_PER_SOL, // 0.1 SOL
+    })
+  );
 
-    // Mint 1000 fake USDT to the user
-    await mintTo(
-      provider.connection,
-      user.payer, usdtMint, userTokenAccount,
-      mintAuthority, MINT_AMOUNT
-    );
+  // 3. Sign and send the transaction
+  await provider.sendAndConfirm(fundTx);
+  console.log("Successfully funded authorities from user wallet.");
+  // --- END NEW FUNDING METHOD ---
 
-    // Find our PDA addresses
-    [vaultPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("vault"), user.publicKey.toBuffer()],
+
+  // === Create a fake USDT Mint ===
+  usdtMint = await createMint(
+    provider.connection,
+    user.payer, // Payer
+    mintAuthority.publicKey, // Mint authority
+    null, // Freeze authority
+    6 // 6 decimals (like USDT)
+  );
+
+  // === Create the user's token account for this fake mint ===
+  const userTokenAccountInfo = await getOrCreateAssociatedTokenAccount(
+    provider.connection,
+    user.payer, // Payer
+    usdtMint, // Mint
+    user.publicKey // Owner
+  );
+  userTokenAccount = userTokenAccountInfo.address;
+
+  // === Mint 1000 fake USDT to the user's account ===
+  await mintTo(
+    provider.connection,
+    user.payer, // Payer
+    usdtMint, // Mint
+    userTokenAccount, // Destination
+    mintAuthority, // Mint authority
+    1000 * 10 ** 6 // 1000 USDT (with 6 decimals)
+  );
+
+  // === Find our PDA addresses ===
+  [vaultPda] = anchor.web3.PublicKey.findProgramAddressSync(
+    [Buffer.from("vault"), user.publicKey.toBuffer()],
+    program.programId
+  );
+
+  [vaultTokenAccountPda] =
+    anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("token"), vaultPda.toBuffer()],
       program.programId
     );
-
-    [vaultTokenAccountPda] =
-      anchor.web3.PublicKey.findProgramAddressSync(
-        [Buffer.from("token"), vaultPda.toBuffer()],
-        program.programId
-      );
-  });
+});
 
   it("Initializes the vault!", async () => {
     const tx = await program.methods
